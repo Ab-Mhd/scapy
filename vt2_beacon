@@ -1,0 +1,56 @@
+from scapy.all import rdpcap
+import numpy as np
+import requests
+import json
+
+VIRUSTOTAL_API_KEY = 'your_virustotal_api_key_here'
+
+def detailed_analysis_of_ip(pcap_file, suspect_ip):
+    packets = rdpcap(pcap_file)
+    
+    # Filter packets for the suspect IP
+    times = []
+    for pkt in packets:
+        if 'IP' in pkt and (pkt['IP'].src == suspect_ip or pkt['IP'].dst == suspect_ip):
+            times.append(pkt.time)
+    
+    if not times:
+        print(f"No packets to or from {suspect_ip} found.")
+        return
+    
+    # Calculate and display timing statistics
+    intervals = np.diff(sorted(times))
+    mean_interval = np.mean(intervals)
+    std_dev_interval = np.std(intervals)
+    min_interval = np.min(intervals)
+    max_interval = np.max(intervals)
+    
+    print(f"Timing Analysis for {suspect_ip}:")
+    print(f"  Mean Interval: {mean_interval:.2f}s")
+    print(f"  Std Dev Interval: {std_dev_interval:.2f}s")
+    print(f"  Min Interval: {min_interval:.2f}s")
+    print(f"  Max Interval: {max_interval:.2f}s")
+    print(f"  Total Packets: {len(times)}")
+    
+    # VirusTotal check
+    check_ip_virustotal(suspect_ip)
+
+def check_ip_virustotal(ip_address):
+    url = f'https://www.virustotal.com/api/v3/ip_addresses/{ip_address}'
+    headers = {'x-apikey': VIRUSTOTAL_API_KEY}
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        result = response.json()
+        data = result.get('data', {})
+        attributes = data.get('attributes', {})
+        last_analysis_stats = attributes.get('last_analysis_stats', {})
+        print(f"VirusTotal Report for {ip_address}:")
+        print(json.dumps(last_analysis_stats, indent=2))
+    else:
+        print(f"Failed to retrieve VirusTotal report for {ip_address}. HTTP Status: {response.status_code}")
+
+# Example usage
+pcap_file = 'path_to_your_pcap_file.pcap'
+suspect_ip = '192.168.1.1'  # Replace with the suspected IP
+detailed_analysis_of_ip(pcap_file, suspect_ip)
