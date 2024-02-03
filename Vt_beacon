@@ -1,0 +1,57 @@
+from scapy.all import rdpcap
+import numpy as np
+import requests
+
+VIRUSTOTAL_API_KEY = 'your_virustotal_api_key_here'
+
+def analyze_beacon_for_ip(pcap_file, target_ip):
+    packets = rdpcap(pcap_file)
+    
+    # Filter packets for the target IP
+    times = []
+    for pkt in packets:
+        if 'IP' in pkt and pkt['IP'].dst == target_ip:
+            times.append(pkt.time)
+            
+    if not times:
+        print(f"No packets to or from {target_ip} found.")
+        return
+    
+    if len(times) > 1:
+        intervals = np.diff(times)
+        mean = np.mean(intervals)
+        std_dev = np.std(intervals)
+        
+        # Simple heuristic to detect beaconing
+        if std_dev / mean < 0.1 and mean < 60:
+            print(f"Potential beacon detected for {target_ip} with interval ~{mean:.2f}s (std dev: {std_dev:.2f})")
+            check_ip_virustotal(target_ip)
+        else:
+            print(f"No beaconing pattern detected for {target_ip}.")
+    else:
+        print(f"Not enough packets for meaningful analysis with {target_ip}.")
+
+def check_ip_virustotal(ip_address):
+    url = f'https://www.virustotal.com/vtapi/v2/ip-address/report'
+    params = {'apikey': VIRUSTOTAL_API_KEY, 'ip': ip_address}
+    response = requests.get(url, params=params)
+    
+    if response.status_code == 200:
+        result = response.json()
+        if result.get('response_code') == 1:
+            detections = result.get('detected_urls', [])
+            if detections:
+                print(f"Malicious activity reported for {ip_address} on VirusTotal:")
+                for detection in detections[:5]:  # Limit to first 5 detections for brevity
+                    print(f"- {detection['url']} ({detection['positives']} positives)")
+            else:
+                print(f"No malicious activity reported for {ip_address} on VirusTotal.")
+        else:
+            print("Error querying VirusTotal or IP not found in database.")
+    else:
+        print("Failed to communicate with VirusTotal API.")
+
+# Example usage
+pcap_file = 'path_to_your_pcap_file.pcap'
+target_ip = '192.168.1.1'  # Replace with your target IP
+analyze_beacon_for_ip(pcap_file, target_ip)
