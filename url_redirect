@@ -1,0 +1,42 @@
+from scapy.all import rdpcap, DNSRR, DNS, IP, TCP
+from scapy.layers.http import HTTPRequest, HTTPResponse
+from urllib.parse import urlparse
+
+def analyze_pcap_for_redirection_and_dns_mismatch(pcap_file):
+    packets = rdpcap(pcap_file)
+    dns_responses = {}
+    http_requests = {}
+
+    # First, map domain names to IPs from DNS responses
+    for pkt in packets:
+        if DNS in pkt and pkt[DNS].qr == 1:  # DNS response
+            for i in range(pkt[DNS].ancount):
+                rr = pkt[DNSRR][i]
+                dns_responses[rr.rrname.decode().rstrip('.')] = rr.rdata
+
+    # Then, analyze HTTP requests and responses
+    for pkt in packets:
+        if pkt.haslayer(HTTPRequest):
+            # Extract the Host header and map it to the requesting packet IP
+            host = pkt[HTTPRequest].Host.decode()
+            if host in dns_responses:
+                http_requests[pkt[IP].dst] = host
+
+        elif pkt.haslayer(HTTPResponse) and pkt.haslayer(HTTPRequest):
+            # Check for redirection via the "Location" header
+            if "Location" in pkt[HTTPResponse].fields:
+                host = pkt[HTTPRequest].Host.decode()
+                location = pkt[HTTPResponse].Location.decode()
+                parsed_url = urlparse(location)
+                if parsed_url.netloc and parsed_url.netloc != host:
+                    print(f"Redirection detected from {host} to {parsed_url.netloc}")
+
+    # Check for DNS mismatches (IP doesn't match URL's resolved IP)
+    for ip, host in http_requests.items():
+        resolved_ip = dns_responses.get(host)
+        if resolved_ip and resolved_ip != ip:
+            print(f"DNS Mismatch: {host} resolved to {resolved_ip} but was accessed via {ip}")
+
+# Example usage
+pcap_file = 'path_to_your_pcap_file.pcap'
+analyze_pcap_for_redirection_and_dns_mismatch(pcap_file)
